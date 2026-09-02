@@ -61,6 +61,7 @@
     <div id="employeeInfo"></div>
     <div id="qrcode"></div>
     <p class="subtext">แสดง QR นี้ให้ รปภ. สแกนตอนมารับพัสดุ</p>
+    <div id="myParcels"></div>
   </div>
 
   <script>
@@ -82,6 +83,7 @@
     // =====================================================
 
     let currentProfile = null;
+    let idToken = null;
 
     // ---------- JSONP helper ----------
     function api(action, params) {
@@ -91,8 +93,10 @@
         const timer = setTimeout(function () { cleanup(); reject(new Error('API timeout')); }, 20000);
         function cleanup() { clearTimeout(timer); delete window[cb]; if (s.parentNode) s.parentNode.removeChild(s); }
         window[cb] = function (res) { cleanup(); resolve(res); };
-        const qs = Object.keys(params || {}).map(function (k) {
-          return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+        const merged = Object.assign({}, params || {});
+        if (idToken) merged.idToken = idToken;
+        const qs = Object.keys(merged).map(function (k) {
+          return encodeURIComponent(k) + '=' + encodeURIComponent(merged[k]);
         }).join('&');
         s.src = API_URL + '?action=' + encodeURIComponent(action) + (qs ? '&' + qs : '') + '&callback=' + cb;
         s.onerror = function () { cleanup(); reject(new Error('เรียก API ไม่สำเร็จ')); };
@@ -116,6 +120,8 @@
         updateDebug('inClient=' + liff.isInClient() + ' | loggedIn=' + liff.isLoggedIn());
 
         if (!liff.isLoggedIn()) { showLoginButton(); return; }
+
+        idToken = liff.getIDToken();
 
         updateLoading('กำลังอ่านข้อมูล LINE...');
         currentProfile = await liff.getProfile();
@@ -203,6 +209,29 @@
       new QRCode(qrContainer, {
         text: String(info.employeeId), width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M
       });
+
+      loadMyParcels();
+    }
+
+    function loadMyParcels() {
+      const box = document.getElementById('myParcels');
+      if (!box) return;
+      box.innerHTML = '<p class="subtext" style="margin-top:14px;">กำลังโหลดพัสดุที่รออยู่...</p>';
+      api('getMyWaitingParcels', {})
+        .then(function (res) {
+          if (!res || !res.parcels || !res.parcels.length) {
+            box.innerHTML = '<p class="subtext" style="margin-top:14px;">ไม่มีพัสดุที่รออยู่</p>';
+            return;
+          }
+          let html = '<div style="text-align:left;margin-top:16px;font-weight:600;">พัสดุที่รออยู่ (' + res.parcels.length + ')</div>';
+          res.parcels.forEach(function (p) {
+            const site = p.site ? (' · 📍' + p.site) : '';
+            html += '<div style="text-align:left;border:1px solid #eee;border-radius:8px;padding:8px 10px;margin-top:6px;font-size:13px;color:#444;">' +
+              escapeHtml((p.courier || '-') + ' · ' + (p.trackingNumber || '-') + site) + '</div>';
+          });
+          box.innerHTML = html;
+        })
+        .catch(function () { box.innerHTML = ''; });
     }
 
     // ---------- UI HELPERS ----------
