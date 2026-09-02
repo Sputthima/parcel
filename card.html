@@ -47,6 +47,8 @@
     <input id="regId" type="text" placeholder="THXXXXXX" autocomplete="off" style="text-transform:uppercase;">
     <div class="field-label">ชื่อ-นามสกุล</div>
     <input id="regName" type="text" placeholder="เช่น สมชาย ใจดี" autocomplete="off">
+    <div class="field-label">ชื่อภาษาอังกฤษ (ถ้ามี — ช่วยให้จับคู่พัสดุแม่นขึ้น)</div>
+    <input id="regNameEn" type="text" placeholder="e.g. Somchai Jaidee" autocomplete="off">
     <div class="field-label">แผนก (ไม่บังคับ)</div>
     <input id="regDept" type="text" placeholder="เช่น คลังสินค้า" autocomplete="off">
     <button class="btn" onclick="submitRegister()">ลงทะเบียน</button>
@@ -146,11 +148,16 @@
     function submitRegister() {
       const employeeId = document.getElementById('regId').value.trim().toUpperCase();
       const name = document.getElementById('regName').value.trim();
+      const nameEn = document.getElementById('regNameEn').value.trim();
       const dept = document.getElementById('regDept').value.trim();
       const errEl = document.getElementById('regError');
       errEl.textContent = '';
 
       if (!employeeId) { errEl.textContent = 'กรุณาระบุรหัสพนักงาน'; return; }
+      if (!/^TH[A-Z0-9]{6}$/.test(employeeId)) {
+        errEl.textContent = 'รหัสพนักงานต้องเป็นรูปแบบ TH ตามด้วยอักขระ 6 ตัว (เช่น TH123456)';
+        return;
+      }
       if (!name) { errEl.textContent = 'กรุณากรอกชื่อ-นามสกุล'; return; }
       if (!currentProfile || !currentProfile.userId) {
         showError('ไม่พบข้อมูล LINE Profile กรุณาเปิดหน้าใหม่อีกครั้ง'); return;
@@ -162,6 +169,7 @@
       api('registerNewEmployee', {
         employeeId: employeeId,
         name: name,
+        englishName: nameEn,
         department: dept,
         lineUserId: currentProfile.userId,
         displayName: currentProfile.displayName || ''
@@ -184,7 +192,10 @@
       document.getElementById('registerView').style.display = 'none';
       document.getElementById('cardView').style.display = 'block';
       document.getElementById('employeeInfo').innerHTML =
-        '<p><b>' + escapeHtml(info.name) + '</b><br>' + escapeHtml(info.department || '') + '</p>';
+        '<p><b>' + escapeHtml(info.name) + '</b><br>' + escapeHtml(info.department || '') + '</p>' +
+        (info.waitingCount > 0
+          ? '<p style="color:#06c755;font-weight:600;">🎉 มีพัสดุรออยู่ ' + info.waitingCount + ' ชิ้น</p>'
+          : '');
 
       const qrContainer = document.getElementById('qrcode');
       qrContainer.innerHTML = '';
