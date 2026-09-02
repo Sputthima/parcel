@@ -15,11 +15,6 @@
     input { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd;
             border-radius: 8px; margin-bottom: 10px; outline: none; }
     input:focus { border-color: #06c755; }
-    .result-item { text-align: left; padding: 12px 14px; border: 1px solid #eee;
-                   border-radius: 10px; margin-bottom: 8px; cursor: pointer; background: #fff; }
-    .result-item:active { background: #f0fff4; }
-    .result-item .name { font-weight: 600; font-size: 15px; }
-    .result-item .dept { color: #888; font-size: 13px; margin-top: 3px; }
     #qrcode { margin: 20px auto; display: flex; justify-content: center; }
     .loading { color: #777; margin: 40px auto; max-width: 380px; }
     .loading-spinner { width: 36px; height: 36px; margin: 0 auto 16px; border: 4px solid #e5e5e5;
@@ -29,9 +24,11 @@
              padding: 16px; border-radius: 10px; text-align: left; word-break: break-word; }
     .subtext { color: #888; font-size: 13px; }
     .debug { margin-top: 12px; font-size: 11px; color: #aaa; word-break: break-all; }
-    .btn { width: 100%; max-width: 280px; margin: 0 auto; padding: 14px; font-size: 16px;
+    .btn { width: 100%; max-width: 320px; margin: 6px auto 0; padding: 14px; font-size: 16px;
            font-weight: 600; border: none; border-radius: 10px; background: #06c755;
            color: #fff; cursor: pointer; }
+    .btn:active { opacity: .85; }
+    .field-label { text-align: left; font-size: 13px; color: #555; margin: 2px 0 4px; }
   </style>
 </head>
 <body>
@@ -42,13 +39,21 @@
     <div id="debugInfo" class="debug"></div>
   </div>
 
+  <!-- หน้าลงทะเบียน (พนักงานกรอกเอง) -->
   <div id="registerView" class="card" style="display:none;">
     <h2>ลงทะเบียนบัตรรับพัสดุ</h2>
-    <p>พิมพ์ชื่อหรือแผนกของคุณเพื่อค้นหารายชื่อ</p>
-    <input id="searchInput" type="text" placeholder="เช่น สมชาย หรือ คลังสินค้า" autocomplete="off" oninput="onSearchInput()">
-    <div id="searchResults"></div>
+    <p>กรอกข้อมูลของคุณเพื่อสร้างบัตรรับพัสดุ</p>
+    <div class="field-label">ระบุรหัสพนักงาน</div>
+    <input id="regId" type="text" placeholder="THXXXXXX" autocomplete="off" style="text-transform:uppercase;">
+    <div class="field-label">ชื่อ-นามสกุล</div>
+    <input id="regName" type="text" placeholder="เช่น สมชาย ใจดี" autocomplete="off">
+    <div class="field-label">แผนก (ไม่บังคับ)</div>
+    <input id="regDept" type="text" placeholder="เช่น คลังสินค้า" autocomplete="off">
+    <button class="btn" onclick="submitRegister()">ลงทะเบียน</button>
+    <div id="regError" style="color:#c00;font-size:13px;margin-top:10px;text-align:left;"></div>
   </div>
 
+  <!-- หน้าบัตร QR -->
   <div id="cardView" class="card" style="display:none;">
     <h2>บัตรรับพัสดุ</h2>
     <div id="employeeInfo"></div>
@@ -75,9 +80,8 @@
     // =====================================================
 
     let currentProfile = null;
-    let searchTimer = null;
 
-    // ---------- JSONP helper (เลี่ยง CORS ของ Apps Script) ----------
+    // ---------- JSONP helper ----------
     function api(action, params) {
       return new Promise(function (resolve, reject) {
         const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
@@ -107,7 +111,6 @@
         updateLoading('กำลังเชื่อมต่อ LINE...');
 
         await liff.init({ liffId: LIFF_ID });
-
         updateDebug('inClient=' + liff.isInClient() + ' | loggedIn=' + liff.isLoggedIn());
 
         if (!liff.isLoggedIn()) { showLoginButton(); return; }
@@ -129,62 +132,39 @@
 
     function onRegistrationChecked(existing) {
       hideLoading();
-      if (existing) { showCard(existing); }
-      else {
-        document.getElementById('registerView').style.display = 'block';
-        document.getElementById('searchInput').focus();
+      if (existing) { showCard(existing); return; }
+      // ยังไม่เคยลงทะเบียน -> โชว์ฟอร์ม + เติมชื่อจาก LINE ให้เป็นค่าเริ่มต้น
+      document.getElementById('registerView').style.display = 'block';
+      const nameEl = document.getElementById('regName');
+      if (currentProfile && currentProfile.displayName && !nameEl.value) {
+        nameEl.value = currentProfile.displayName;
       }
+      document.getElementById('regId').focus();
     }
 
-    // ---------- SEARCH ----------
-    function onSearchInput() {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(searchEmployee, 300);
-    }
+    // ---------- SELF REGISTER ----------
+    function submitRegister() {
+      const employeeId = document.getElementById('regId').value.trim().toUpperCase();
+      const name = document.getElementById('regName').value.trim();
+      const dept = document.getElementById('regDept').value.trim();
+      const errEl = document.getElementById('regError');
+      errEl.textContent = '';
 
-    function searchEmployee() {
-      const query = document.getElementById('searchInput').value.trim();
-      const container = document.getElementById('searchResults');
-      if (!query) { container.innerHTML = ''; return; }
-      container.innerHTML = '<p class="subtext">กำลังค้นหา...</p>';
-
-      api('searchUnregisteredEmployees', { query: query })
-        .then(renderResults)
-        .catch(function (err) {
-          container.innerHTML = '<p style="color:#c00;">' + escapeHtml(getErrorMessage(err)) + '</p>';
-        });
-    }
-
-    function renderResults(results) {
-      const container = document.getElementById('searchResults');
-      container.innerHTML = '';
-      if (!results || results.length === 0) {
-        container.innerHTML = '<p class="subtext">ไม่พบรายชื่อ ลองพิมพ์คำอื่น หรือติดต่อ Admin</p>';
-        return;
-      }
-      results.forEach(function (r) {
-        const div = document.createElement('div');
-        div.className = 'result-item';
-        div.innerHTML = '<div class="name">' + escapeHtml(r.name) + '</div>' +
-                        '<div class="dept">' + escapeHtml(r.department || '') + '</div>';
-        div.onclick = function () { selectEmployee(r.employeeId); };
-        container.appendChild(div);
-      });
-    }
-
-    // ---------- REGISTER ----------
-    function selectEmployee(employeeId) {
+      if (!employeeId) { errEl.textContent = 'กรุณาระบุรหัสพนักงาน'; return; }
+      if (!name) { errEl.textContent = 'กรุณากรอกชื่อ-นามสกุล'; return; }
       if (!currentProfile || !currentProfile.userId) {
-        showError('ไม่พบข้อมูล LINE Profile กรุณาเปิดหน้าใหม่อีกครั้ง');
-        return;
+        showError('ไม่พบข้อมูล LINE Profile กรุณาเปิดหน้าใหม่อีกครั้ง'); return;
       }
+
       document.getElementById('registerView').style.display = 'none';
       showLoading('กำลังลงทะเบียน...');
 
-      api('registerLineUser', {
+      api('registerNewEmployee', {
         employeeId: employeeId,
+        name: name,
+        department: dept,
         lineUserId: currentProfile.userId,
-        displayName: currentProfile.displayName
+        displayName: currentProfile.displayName || ''
       })
         .then(onRegisterResult)
         .catch(function (err) { showError('ลงทะเบียนไม่สำเร็จ: ' + getErrorMessage(err)); });
@@ -194,7 +174,8 @@
       hideLoading();
       if (result && result.success) { showCard(result); return; }
       document.getElementById('registerView').style.display = 'block';
-      showError(result && result.message ? result.message : 'ลงทะเบียนไม่สำเร็จ');
+      document.getElementById('regError').textContent =
+        (result && result.message) ? result.message : 'ลงทะเบียนไม่สำเร็จ';
     }
 
     // ---------- QR CARD ----------
