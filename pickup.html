@@ -111,6 +111,7 @@
     let picker = null;
     const selected = new Map();
     let behalfTimer = null;
+    let idToken = null;
 
     // ---------- JSONP helper ----------
     function api(action, params) {
@@ -120,13 +121,20 @@
         const timer = setTimeout(function () { cleanup(); reject(new Error('API timeout')); }, 20000);
         function cleanup() { clearTimeout(timer); delete window[cb]; if (s.parentNode) s.parentNode.removeChild(s); }
         window[cb] = function (res) { cleanup(); resolve(res); };
-        const qs = Object.keys(params || {}).map(function (k) {
-          return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+        const merged = Object.assign({}, params || {});
+        if (idToken) merged.idToken = idToken;
+        const qs = Object.keys(merged).map(function (k) {
+          return encodeURIComponent(k) + '=' + encodeURIComponent(merged[k]);
         }).join('&');
         s.src = API_URL + '?action=' + encodeURIComponent(action) + (qs ? '&' + qs : '') + '&callback=' + cb;
         s.onerror = function () { cleanup(); reject(new Error('เรียก API ไม่สำเร็จ')); };
         document.body.appendChild(s);
       });
+    }
+
+    function driveThumb(url) {
+      const m = String(url || '').match(/[-\w]{25,}/);
+      return m ? ('https://drive.google.com/thumbnail?id=' + m[0] + '&sz=w200') : '';
     }
 
     window.addEventListener('load', startApp);
@@ -145,6 +153,8 @@
         updateDebug('inClient=' + liff.isInClient() + ' | loggedIn=' + liff.isLoggedIn());
 
         if (!liff.isLoggedIn()) { showLoginButton(); return; }
+
+        idToken = liff.getIDToken();
 
         hideLoading();
         show('scanView');
@@ -256,7 +266,14 @@
         wrap.classList.toggle('checked', cb.checked);
         refreshConfirm();
       });
-      wrap.appendChild(cb); wrap.appendChild(body);
+      wrap.appendChild(cb);
+      if (p.imageUrl) {
+        const img = document.createElement('img');
+        img.src = driveThumb(p.imageUrl);
+        img.style.cssText = 'width:44px;height:44px;object-fit:cover;border-radius:6px;flex:none;';
+        wrap.appendChild(img);
+      }
+      wrap.appendChild(body);
       return wrap;
     }
 
