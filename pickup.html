@@ -241,6 +241,7 @@
       const onBehalf = isBehalf && !ownedByPicker(p);
       const displayName = p.receiverNameOCR || p.companyName || '(ไม่ระบุชื่อ)';
       const meta = [];
+      if (p.site) meta.push('📍' + p.site);
       if (p.courier) meta.push(p.courier);
       if (p.trackingNumber) meta.push(p.trackingNumber);
       if (p.parcelType) meta.push(p.parcelType);
