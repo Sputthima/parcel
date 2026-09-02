@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>สแกนรับพัสดุ (รปภ.)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+           background: #f5f5f5; margin: 0; padding: 20px 14px 96px; color: #222; }
+    .card { background: #fff; border-radius: 16px; padding: 20px; max-width: 420px;
+            margin: 0 auto 14px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+    h2 { margin: 0 0 4px; color: #06c755; font-size: 20px; }
+    p { line-height: 1.5; } .subtext { color: #888; font-size: 13px; }
+    .btn { width: 100%; padding: 14px; font-size: 16px; font-weight: 600; border: none;
+           border-radius: 10px; background: #06c755; color: #fff; cursor: pointer; }
+    .btn:active { opacity: .85; }
+    .btn.secondary { background: #eef1f4; color: #333; }
+    .btn:disabled { background: #cfe9d6; cursor: default; }
+    input { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd;
+            border-radius: 8px; outline: none; margin-bottom: 10px; }
+    input:focus { border-color: #06c755; }
+    .item { display: flex; align-items: flex-start; gap: 12px; text-align: left; padding: 12px 14px;
+            border: 1px solid #eee; border-radius: 10px; margin-bottom: 8px; cursor: pointer; }
+    .item.checked { border-color: #06c755; background: #f0fff4; }
+    .item input[type=checkbox] { width: 22px; height: 22px; margin: 2px 0 0; flex: none; }
+    .item .body { flex: 1; } .item .name { font-weight: 600; font-size: 15px; }
+    .item .meta { color: #666; font-size: 13px; margin-top: 3px; }
+    .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+             background: #fff3cd; color: #8a6d00; margin-left: 6px; }
+    .section-title { font-weight: 600; margin: 4px 0 10px; }
+    .divider { height: 1px; background: #eee; margin: 16px 0; }
+    .bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 14px;
+           background: rgba(255,255,255,.96); box-shadow: 0 -2px 10px rgba(0,0,0,.08); }
+    .bar .inner { max-width: 420px; margin: 0 auto; }
+    .loading { color: #777; margin: 48px auto; max-width: 420px; text-align: center; }
+    .loading-spinner { width: 36px; height: 36px; margin: 0 auto 16px; border: 4px solid #e5e5e5;
+                       border-top-color: #06c755; border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { display: block; background: #fff0f0; border: 1px solid #ffc5c5; color: #c00;
+             padding: 16px; border-radius: 10px; text-align: left; word-break: break-word; }
+    .debug { margin-top: 12px; font-size: 11px; color: #aaa; word-break: break-all; }
+    .ok-box { background:#f0fff4; border:1px solid #b7ebc6; border-radius:10px; padding:16px; text-align:left; }
+  </style>
+</head>
+<body>
+
+  <div id="loading" class="loading">
+    <div class="loading-spinner"></div>
+    <div id="loadingText">กำลังเชื่อมต่อ LINE...</div>
+    <div id="debugInfo" class="debug"></div>
+  </div>
+
+  <div id="scanView" class="card" style="display:none;">
+    <h2>สแกนรับพัสดุ</h2>
+    <p class="subtext">ให้พนักงานแสดง QR ส่วนตัว แล้วกดสแกน</p>
+    <button class="btn" onclick="startScan()">📷 สแกน QR พนักงาน</button>
+    <div class="divider"></div>
+    <p class="subtext" style="margin-top:0;">สแกนไม่ได้? กรอกรหัสพนักงานเอง</p>
+    <input id="manualId" type="text" placeholder="เช่น EMP001" autocomplete="off">
+    <button class="btn secondary" onclick="useManualId()">ค้นหาด้วยรหัส</button>
+  </div>
+
+  <div id="listWrap" style="display:none;">
+    <div class="card">
+      <h2 id="pickerName">—</h2>
+      <p class="subtext" id="pickerDept"></p>
+    </div>
+    <div class="card">
+      <div class="section-title">พัสดุที่รอรับ</div>
+      <div id="ownParcels"></div>
+      <div id="emptyOwn" class="subtext" style="display:none;">ไม่มีพัสดุที่รอรับของคนนี้</div>
+      <div class="divider"></div>
+      <div class="section-title">รับแทนคนอื่น</div>
+      <p class="subtext" style="margin-top:0;">ค้นหาชื่อ/บริษัทบนพัสดุ แล้วติ๊กเพิ่มได้</p>
+      <input id="behalfSearch" type="text" placeholder="พิมพ์ชื่อเจ้าของพัสดุ" autocomplete="off" oninput="onBehalfSearch()">
+      <div id="behalfResults"></div>
+    </div>
+  </div>
+
+  <div id="resultView" class="card" style="display:none;">
+    <h2>บันทึกเรียบร้อย</h2>
+    <div id="resultBody" class="ok-box"></div>
+    <div style="height:14px;"></div>
+    <button class="btn" onclick="resetToScan()">สแกนคนถัดไป</button>
+  </div>
+
+  <div id="confirmBar" class="bar" style="display:none;">
+    <div class="inner">
+      <button id="confirmBtn" class="btn" onclick="doConfirm()" disabled>ยืนยันรับของ</button>
+    </div>
+  </div>
+
+  <script>
+    window.onerror = function (message, source, lineno) {
+      showError('JavaScript Error: ' + message + ' (บรรทัด ' + lineno + ')');
+      return false;
+    };
+  </script>
+
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <script>
+    // =====================================================
+    // ⚙️ ตั้งค่า 2 บรรทัดนี้ให้ตรงกับของคุณ
+    // =====================================================
+    const API_URL = 'https://script.google.com/macros/s/XXXXXXXX/exec'; // /exec URL ของ Web App (ตัวเดียวกับ card)
+    const LIFF_ID = 'XXXXXXXXXX-xxxxxxxx';                              // LIFF ID ของหน้า Pickup (รปภ.)
+    // =====================================================
+
+    let picker = null;
+    const selected = new Map();
+    let behalfTimer = null;
+
+    // ---------- JSONP helper ----------
+    function api(action, params) {
+      return new Promise(function (resolve, reject) {
+        const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+        const s = document.createElement('script');
+        const timer = setTimeout(function () { cleanup(); reject(new Error('API timeout')); }, 20000);
+        function cleanup() { clearTimeout(timer); delete window[cb]; if (s.parentNode) s.parentNode.removeChild(s); }
+        window[cb] = function (res) { cleanup(); resolve(res); };
+        const qs = Object.keys(params || {}).map(function (k) {
+          return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+        }).join('&');
+        s.src = API_URL + '?action=' + encodeURIComponent(action) + (qs ? '&' + qs : '') + '&callback=' + cb;
+        s.onerror = function () { cleanup(); reject(new Error('เรียก API ไม่สำเร็จ')); };
+        document.body.appendChild(s);
+      });
+    }
+
+    window.addEventListener('load', startApp);
+
+    async function startApp() {
+      try {
+        updateLoading('กำลังตรวจสอบ LIFF SDK...');
+        if (typeof liff === 'undefined') throw new Error('โหลด LIFF SDK ไม่สำเร็จ');
+        if (!LIFF_ID || LIFF_ID.indexOf('XXXX') !== -1) throw new Error('ยังไม่ได้ใส่ LIFF_ID ในไฟล์ pickup.html');
+        if (!API_URL || API_URL.indexOf('XXXX') !== -1) throw new Error('ยังไม่ได้ใส่ API_URL ในไฟล์ pickup.html');
+
+        updateDebug('LIFF ID: ' + LIFF_ID);
+        updateLoading('กำลังเชื่อมต่อ LINE...');
+
+        await liff.init({ liffId: LIFF_ID });
+        updateDebug('inClient=' + liff.isInClient() + ' | loggedIn=' + liff.isLoggedIn());
+
+        if (!liff.isLoggedIn()) { showLoginButton(); return; }
+
+        hideLoading();
+        show('scanView');
+      } catch (err) {
+        showError('LIFF Error: ' + getErrorMessage(err));
+      }
+    }
+
+    // ---------- SCAN ----------
+    async function startScan() {
+      if (!liff.isInClient() || typeof liff.scanCodeV2 !== 'function') {
+        alert('อุปกรณ์นี้สแกนในแอปไม่ได้ กรุณากรอกรหัสพนักงานเองด้านล่าง');
+        return;
+      }
+      try {
+        const res = await liff.scanCodeV2();
+        const code = res && res.value ? String(res.value).trim() : '';
+        if (!code) { alert('ไม่พบข้อมูลใน QR ลองใหม่อีกครั้ง'); return; }
+        loadContext(code);
+      } catch (err) {
+        showError('สแกนไม่สำเร็จ: ' + getErrorMessage(err));
+      }
+    }
+
+    function useManualId() {
+      const id = document.getElementById('manualId').value.trim();
+      if (!id) { alert('กรุณากรอกรหัสพนักงาน'); return; }
+      loadContext(id);
+    }
+
+    // ---------- LOAD CONTEXT ----------
+    function loadContext(employeeId) {
+      show(null);
+      showLoading('กำลังดึงรายการพัสดุ...');
+      selected.clear();
+      api('getPickupContext', { employeeId: employeeId })
+        .then(onContext)
+        .catch(function (err) { showError('ดึงข้อมูลไม่สำเร็จ: ' + getErrorMessage(err)); });
+    }
+
+    function onContext(ctx) {
+      hideLoading();
+      if (!ctx || !ctx.success) {
+        showError((ctx && ctx.message) ? ctx.message : 'ไม่พบข้อมูลพนักงาน');
+        setTimeout(resetToScan, 2500);
+        return;
+      }
+      picker = ctx.picker;
+      document.getElementById('pickerName').textContent = 'ผู้รับ: ' + picker.name;
+      document.getElementById('pickerDept').textContent = picker.department || '';
+      renderOwn(ctx.parcels || []);
+      document.getElementById('behalfSearch').value = '';
+      document.getElementById('behalfResults').innerHTML = '';
+      show('listWrap');
+      document.getElementById('confirmBar').style.display = 'block';
+      refreshConfirm();
+    }
+
+    function renderOwn(parcels) {
+      const box = document.getElementById('ownParcels');
+      box.innerHTML = '';
+      document.getElementById('emptyOwn').style.display = parcels.length ? 'none' : 'block';
+      parcels.forEach(function (p) { box.appendChild(makeItem(p, false)); });
+    }
+
+    // ---------- BEHALF SEARCH ----------
+    function onBehalfSearch() { clearTimeout(behalfTimer); behalfTimer = setTimeout(runBehalfSearch, 350); }
+    function runBehalfSearch() {
+      const q = document.getElementById('behalfSearch').value.trim();
+      const box = document.getElementById('behalfResults');
+      if (!q) { box.innerHTML = ''; return; }
+      box.innerHTML = '<p class="subtext">กำลังค้นหา...</p>';
+      api('searchWaitingParcels', { query: q })
+        .then(function (results) {
+          box.innerHTML = '';
+          if (!results || !results.length) {
+            box.innerHTML = '<p class="subtext">ไม่พบพัสดุที่รอรับตามคำค้นนี้</p>';
+            return;
+          }
+          results.forEach(function (p) { box.appendChild(makeItem(p, true)); });
+        })
+        .catch(function (err) {
+          box.innerHTML = '<p style="color:#c00;">' + escapeHtml(getErrorMessage(err)) + '</p>';
+        });
+    }
+
+    // ---------- BUILD ROW ----------
+    function makeItem(p, isBehalf) {
+      const wrap = document.createElement('label');
+      wrap.className = 'item' + (selected.has(p.parcelId) ? ' checked' : '');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = selected.has(p.parcelId);
+      const onBehalf = isBehalf && !ownedByPicker(p);
+      const displayName = p.receiverNameOCR || p.companyName || '(ไม่ระบุชื่อ)';
+      const meta = [];
+      if (p.courier) meta.push(p.courier);
+      if (p.trackingNumber) meta.push(p.trackingNumber);
+      if (p.parcelType) meta.push(p.parcelType);
+      if (p.intakeTime) meta.push(p.intakeTime);
+      const body = document.createElement('div');
+      body.className = 'body';
+      body.innerHTML = '<div class="name">' + escapeHtml(displayName) +
+        (onBehalf ? '<span class="badge">รับแทน</span>' : '') + '</div>' +
+        '<div class="meta">' + escapeHtml(meta.join(' · ')) + '</div>';
+      cb.addEventListener('change', function () {
+        if (cb.checked) selected.set(p.parcelId, p); else selected.delete(p.parcelId);
+        wrap.classList.toggle('checked', cb.checked);
+        refreshConfirm();
+      });
+      wrap.appendChild(cb); wrap.appendChild(body);
+      return wrap;
+    }
+
+    function ownedByPicker(p) {
+      if (!picker) return false;
+      if (p.matchedEmployeeId && String(p.matchedEmployeeId) === String(picker.employeeId)) return true;
+      if (picker.name && p.receiverNameOCR && p.receiverNameOCR.indexOf(picker.name) !== -1) return true;
+      return false;
+    }
+
+    // ---------- CONFIRM ----------
+    function refreshConfirm() {
+      const n = selected.size;
+      const btn = document.getElementById('confirmBtn');
+      btn.disabled = n === 0;
+      btn.textContent = n === 0 ? 'ยืนยันรับของ' : ('ยืนยันรับของ (' + n + ' ชิ้น)');
+    }
+
+    function doConfirm() {
+      const ids = Array.from(selected.keys());
+      if (!ids.length) return;
+      document.getElementById('confirmBtn').disabled = true;
+      show(null);
+      document.getElementById('confirmBar').style.display = 'none';
+      showLoading('กำลังบันทึก...');
+      api('confirmPickup', { parcelIds: ids.join(','), pickerEmployeeId: picker.employeeId })
+        .then(onConfirmed)
+        .catch(function (err) { showError('บันทึกไม่สำเร็จ: ' + getErrorMessage(err)); });
+    }
+
+    function onConfirmed(res) {
+      hideLoading();
+      if (!res || !res.success) { showError((res && res.message) ? res.message : 'บันทึกไม่สำเร็จ'); return; }
+      let html = '<b>' + escapeHtml(res.pickerName) + '</b> รับพัสดุ ' + res.updatedCount + ' ชิ้นเรียบร้อย';
+      if (res.skippedIds && res.skippedIds.length) {
+        html += '<br><span class="subtext">' + res.skippedIds.length + ' ชิ้นถูกรับไปก่อนหน้าแล้ว จึงข้ามให้</span>';
+      }
+      document.getElementById('resultBody').innerHTML = html;
+      show('resultView');
+    }
+
+    function resetToScan() {
+      picker = null; selected.clear();
+      document.getElementById('confirmBar').style.display = 'none';
+      document.getElementById('manualId').value = '';
+      hideLoading();
+      show('scanView');
+    }
+
+    // ---------- UI HELPERS ----------
+    const VIEWS = ['loading', 'scanView', 'listWrap', 'resultView'];
+    function show(id) {
+      VIEWS.forEach(function (v) { const el = document.getElementById(v); if (el) el.style.display = (v === id) ? 'block' : 'none'; });
+    }
+    function updateLoading(m) { const el = document.getElementById('loadingText'); if (el) el.textContent = m; }
+    function showLoading(m) {
+      const el = document.getElementById('loading');
+      el.style.display = 'block';
+      el.innerHTML = '<div class="loading-spinner"></div><div id="loadingText"></div><div id="debugInfo" class="debug"></div>';
+      updateLoading(m);
+    }
+    function hideLoading() { const el = document.getElementById('loading'); if (el) el.style.display = 'none'; }
+    function updateDebug(m) { const el = document.getElementById('debugInfo'); if (el) el.textContent = m; }
+    function showLoginButton() {
+      const el = document.getElementById('loading');
+      el.style.display = 'block';
+      el.innerHTML = '<p>ต้องเข้าสู่ระบบ LINE ก่อนใช้งาน</p>' +
+                     '<button class="btn" style="max-width:280px;margin:0 auto;" onclick="liff.login()">เข้าสู่ระบบด้วย LINE</button>';
+    }
+    function showError(err) {
+      const el = document.getElementById('loading');
+      el.style.display = 'block';
+      el.innerHTML = '<span class="error"><b>เกิดข้อผิดพลาด</b><br><br>' + escapeHtml(getErrorMessage(err)) + '</span>';
+    }
+    function getErrorMessage(err) { if (!err) return 'Unknown error'; if (err.message) return err.message; return String(err); }
+    function escapeHtml(v) {
+      if (v === null || v === undefined) return '';
+      return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+  </script>
+</body>
+</html>

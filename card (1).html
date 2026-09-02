@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>บัตรรับพัสดุ</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+           background: #f5f5f5; margin: 0; padding: 24px 16px; text-align: center; color: #222; }
+    .card { background: #fff; border-radius: 16px; padding: 24px; max-width: 380px;
+            margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+    h2 { margin-top: 0; color: #06c755; }
+    p { line-height: 1.5; }
+    input { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd;
+            border-radius: 8px; margin-bottom: 10px; outline: none; }
+    input:focus { border-color: #06c755; }
+    .result-item { text-align: left; padding: 12px 14px; border: 1px solid #eee;
+                   border-radius: 10px; margin-bottom: 8px; cursor: pointer; background: #fff; }
+    .result-item:active { background: #f0fff4; }
+    .result-item .name { font-weight: 600; font-size: 15px; }
+    .result-item .dept { color: #888; font-size: 13px; margin-top: 3px; }
+    #qrcode { margin: 20px auto; display: flex; justify-content: center; }
+    .loading { color: #777; margin: 40px auto; max-width: 380px; }
+    .loading-spinner { width: 36px; height: 36px; margin: 0 auto 16px; border: 4px solid #e5e5e5;
+                       border-top-color: #06c755; border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { display: block; background: #fff0f0; border: 1px solid #ffc5c5; color: #c00;
+             padding: 16px; border-radius: 10px; text-align: left; word-break: break-word; }
+    .subtext { color: #888; font-size: 13px; }
+    .debug { margin-top: 12px; font-size: 11px; color: #aaa; word-break: break-all; }
+    .btn { width: 100%; max-width: 280px; margin: 0 auto; padding: 14px; font-size: 16px;
+           font-weight: 600; border: none; border-radius: 10px; background: #06c755;
+           color: #fff; cursor: pointer; }
+  </style>
+</head>
+<body>
+
+  <div id="loading" class="loading">
+    <div class="loading-spinner"></div>
+    <div id="loadingText">กำลังเชื่อมต่อ LINE...</div>
+    <div id="debugInfo" class="debug"></div>
+  </div>
+
+  <div id="registerView" class="card" style="display:none;">
+    <h2>ลงทะเบียนบัตรรับพัสดุ</h2>
+    <p>พิมพ์ชื่อหรือแผนกของคุณเพื่อค้นหารายชื่อ</p>
+    <input id="searchInput" type="text" placeholder="เช่น สมชาย หรือ คลังสินค้า" autocomplete="off" oninput="onSearchInput()">
+    <div id="searchResults"></div>
+  </div>
+
+  <div id="cardView" class="card" style="display:none;">
+    <h2>บัตรรับพัสดุ</h2>
+    <div id="employeeInfo"></div>
+    <div id="qrcode"></div>
+    <p class="subtext">แสดง QR นี้ให้ รปภ. สแกนตอนมารับพัสดุ</p>
+  </div>
+
+  <script>
+    window.onerror = function (message, source, lineno) {
+      showError('JavaScript Error: ' + message + ' (บรรทัด ' + lineno + ')');
+      return false;
+    };
+  </script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <script>
+    // =====================================================
+    // ⚙️ ตั้งค่า 2 บรรทัดนี้ให้ตรงกับของคุณ
+    // =====================================================
+    const API_URL = 'https://script.google.com/macros/s/XXXXXXXX/exec'; // /exec URL ของ Web App
+    const LIFF_ID = 'XXXXXXXXXX-xxxxxxxx';                              // LIFF ID ของหน้า Card
+    // =====================================================
+
+    let currentProfile = null;
+    let searchTimer = null;
+
+    // ---------- JSONP helper (เลี่ยง CORS ของ Apps Script) ----------
+    function api(action, params) {
+      return new Promise(function (resolve, reject) {
+        const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+        const s = document.createElement('script');
+        const timer = setTimeout(function () { cleanup(); reject(new Error('API timeout')); }, 20000);
+        function cleanup() { clearTimeout(timer); delete window[cb]; if (s.parentNode) s.parentNode.removeChild(s); }
+        window[cb] = function (res) { cleanup(); resolve(res); };
+        const qs = Object.keys(params || {}).map(function (k) {
+          return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+        }).join('&');
+        s.src = API_URL + '?action=' + encodeURIComponent(action) + (qs ? '&' + qs : '') + '&callback=' + cb;
+        s.onerror = function () { cleanup(); reject(new Error('เรียก API ไม่สำเร็จ')); };
+        document.body.appendChild(s);
+      });
+    }
+
+    window.addEventListener('load', startApp);
+
+    async function startApp() {
+      try {
+        updateLoading('กำลังตรวจสอบ LIFF SDK...');
+        if (typeof liff === 'undefined') throw new Error('โหลด LIFF SDK ไม่สำเร็จ');
+        if (!LIFF_ID || LIFF_ID.indexOf('XXXX') !== -1) throw new Error('ยังไม่ได้ใส่ LIFF_ID ในไฟล์ card.html');
+        if (!API_URL || API_URL.indexOf('XXXX') !== -1) throw new Error('ยังไม่ได้ใส่ API_URL ในไฟล์ card.html');
+
+        updateDebug('LIFF ID: ' + LIFF_ID);
+        updateLoading('กำลังเชื่อมต่อ LINE...');
+
+        await liff.init({ liffId: LIFF_ID });
+
+        updateDebug('inClient=' + liff.isInClient() + ' | loggedIn=' + liff.isLoggedIn());
+
+        if (!liff.isLoggedIn()) { showLoginButton(); return; }
+
+        updateLoading('กำลังอ่านข้อมูล LINE...');
+        currentProfile = await liff.getProfile();
+        if (!currentProfile || !currentProfile.userId) throw new Error('ไม่สามารถอ่าน LINE Profile ได้');
+
+        updateDebug('LINE user: ' + currentProfile.displayName);
+        updateLoading('กำลังตรวจสอบการลงทะเบียน...');
+
+        const existing = await api('checkRegistration', { lineUserId: currentProfile.userId });
+        onRegistrationChecked(existing);
+
+      } catch (err) {
+        showError('LIFF Error: ' + getErrorMessage(err));
+      }
+    }
+
+    function onRegistrationChecked(existing) {
+      hideLoading();
+      if (existing) { showCard(existing); }
+      else {
+        document.getElementById('registerView').style.display = 'block';
+        document.getElementById('searchInput').focus();
+      }
+    }
+
+    // ---------- SEARCH ----------
+    function onSearchInput() {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(searchEmployee, 300);
+    }
+
+    function searchEmployee() {
+      const query = document.getElementById('searchInput').value.trim();
+      const container = document.getElementById('searchResults');
+      if (!query) { container.innerHTML = ''; return; }
+      container.innerHTML = '<p class="subtext">กำลังค้นหา...</p>';
+
+      api('searchUnregisteredEmployees', { query: query })
+        .then(renderResults)
+        .catch(function (err) {
+          container.innerHTML = '<p style="color:#c00;">' + escapeHtml(getErrorMessage(err)) + '</p>';
+        });
+    }
+
+    function renderResults(results) {
+      const container = document.getElementById('searchResults');
+      container.innerHTML = '';
+      if (!results || results.length === 0) {
+        container.innerHTML = '<p class="subtext">ไม่พบรายชื่อ ลองพิมพ์คำอื่น หรือติดต่อ Admin</p>';
+        return;
+      }
+      results.forEach(function (r) {
+        const div = document.createElement('div');
+        div.className = 'result-item';
+        div.innerHTML = '<div class="name">' + escapeHtml(r.name) + '</div>' +
+                        '<div class="dept">' + escapeHtml(r.department || '') + '</div>';
+        div.onclick = function () { selectEmployee(r.employeeId); };
+        container.appendChild(div);
+      });
+    }
+
+    // ---------- REGISTER ----------
+    function selectEmployee(employeeId) {
+      if (!currentProfile || !currentProfile.userId) {
+        showError('ไม่พบข้อมูล LINE Profile กรุณาเปิดหน้าใหม่อีกครั้ง');
+        return;
+      }
+      document.getElementById('registerView').style.display = 'none';
+      showLoading('กำลังลงทะเบียน...');
+
+      api('registerLineUser', {
+        employeeId: employeeId,
+        lineUserId: currentProfile.userId,
+        displayName: currentProfile.displayName
+      })
+        .then(onRegisterResult)
+        .catch(function (err) { showError('ลงทะเบียนไม่สำเร็จ: ' + getErrorMessage(err)); });
+    }
+
+    function onRegisterResult(result) {
+      hideLoading();
+      if (result && result.success) { showCard(result); return; }
+      document.getElementById('registerView').style.display = 'block';
+      showError(result && result.message ? result.message : 'ลงทะเบียนไม่สำเร็จ');
+    }
+
+    // ---------- QR CARD ----------
+    function showCard(info) {
+      hideLoading();
+      document.getElementById('registerView').style.display = 'none';
+      document.getElementById('cardView').style.display = 'block';
+      document.getElementById('employeeInfo').innerHTML =
+        '<p><b>' + escapeHtml(info.name) + '</b><br>' + escapeHtml(info.department || '') + '</p>';
+
+      const qrContainer = document.getElementById('qrcode');
+      qrContainer.innerHTML = '';
+      if (typeof QRCode === 'undefined') { showError('โหลด QR Code library ไม่สำเร็จ'); return; }
+      new QRCode(qrContainer, {
+        text: String(info.employeeId), width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+
+    // ---------- UI HELPERS ----------
+    function updateLoading(m) { const el = document.getElementById('loadingText'); if (el) el.textContent = m; }
+    function showLoading(m) {
+      const el = document.getElementById('loading');
+      el.style.display = 'block';
+      el.innerHTML = '<div class="loading-spinner"></div><div id="loadingText"></div><div id="debugInfo" class="debug"></div>';
+      updateLoading(m);
+    }
+    function hideLoading() { const el = document.getElementById('loading'); if (el) el.style.display = 'none'; }
+    function updateDebug(m) { const el = document.getElementById('debugInfo'); if (el) el.textContent = m; }
+    function showLoginButton() {
+      const el = document.getElementById('loading');
+      el.style.display = 'block';
+      el.innerHTML = '<p>ต้องเข้าสู่ระบบ LINE ก่อนใช้งาน</p>' +
+                     '<button class="btn" onclick="liff.login()">เข้าสู่ระบบด้วย LINE</button>';
+    }
+    function showError(err) {
+      const el = document.getElementById('loading');
+      el.style.display = 'block';
+      el.innerHTML = '<span class="error"><b>เกิดข้อผิดพลาด</b><br><br>' + escapeHtml(getErrorMessage(err)) + '</span>';
+    }
+    function getErrorMessage(err) { if (!err) return 'Unknown error'; if (err.message) return err.message; return String(err); }
+    function escapeHtml(v) {
+      if (v === null || v === undefined) return '';
+      return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+  </script>
+</body>
+</html>
