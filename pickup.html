@@ -113,12 +113,18 @@
     let behalfTimer = null;
     let idToken = null;
 
-    // ---------- JSONP helper ----------
+    // ---------- JSONP helper (มี retry 1 ครั้ง) ----------
     function api(action, params) {
+      return apiOnce(action, params).catch(function (err) {
+        return apiOnce(action, params);
+      });
+    }
+
+    function apiOnce(action, params) {
       return new Promise(function (resolve, reject) {
         const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
         const s = document.createElement('script');
-        const timer = setTimeout(function () { cleanup(); reject(new Error('API timeout')); }, 20000);
+        const timer = setTimeout(function () { cleanup(); reject(new Error('API timeout')); }, 25000);
         function cleanup() { clearTimeout(timer); delete window[cb]; if (s.parentNode) s.parentNode.removeChild(s); }
         window[cb] = function (res) { cleanup(); resolve(res); };
         const merged = Object.assign({}, params || {});
@@ -307,9 +313,15 @@
     function onConfirmed(res) {
       hideLoading();
       if (!res || !res.success) { showError((res && res.message) ? res.message : 'บันทึกไม่สำเร็จ'); return; }
-      let html = '<b>' + escapeHtml(res.pickerName) + '</b> รับพัสดุ ' + res.updatedCount + ' ชิ้นเรียบร้อย';
-      if (res.skippedIds && res.skippedIds.length) {
-        html += '<br><span class="subtext">' + res.skippedIds.length + ' ชิ้นถูกรับไปก่อนหน้าแล้ว จึงข้ามให้</span>';
+      const skipped = (res.skippedIds && res.skippedIds.length) || 0;
+      let html;
+      if (res.updatedCount > 0) {
+        html = '<b>' + escapeHtml(res.pickerName) + '</b> รับพัสดุ ' + res.updatedCount + ' ชิ้นเรียบร้อย';
+        if (skipped) html += '<br><span class="subtext">' + skipped + ' ชิ้นถูกรับไปก่อนหน้าแล้ว จึงข้ามให้</span>';
+      } else if (skipped) {
+        html = 'พัสดุถูกบันทึกรับเรียบร้อยแล้ว (' + skipped + ' ชิ้น)';
+      } else {
+        html = 'ไม่มีรายการที่อัปเดต';
       }
       document.getElementById('resultBody').innerHTML = html;
       show('resultView');
