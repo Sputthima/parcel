@@ -85,12 +85,18 @@
     let currentProfile = null;
     let idToken = null;
 
-    // ---------- JSONP helper ----------
+    // ---------- JSONP helper (มี retry 1 ครั้ง กัน GAS ตอบช้าเป็นบางจังหวะ) ----------
     function api(action, params) {
+      return apiOnce(action, params).catch(function (err) {
+        return apiOnce(action, params); // ลองซ้ำอีกครั้ง
+      });
+    }
+
+    function apiOnce(action, params) {
       return new Promise(function (resolve, reject) {
         const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
         const s = document.createElement('script');
-        const timer = setTimeout(function () { cleanup(); reject(new Error('API timeout')); }, 20000);
+        const timer = setTimeout(function () { cleanup(); reject(new Error('API timeout')); }, 25000);
         function cleanup() { clearTimeout(timer); delete window[cb]; if (s.parentNode) s.parentNode.removeChild(s); }
         window[cb] = function (res) { cleanup(); resolve(res); };
         const merged = Object.assign({}, params || {});
@@ -217,7 +223,7 @@
       const box = document.getElementById('myParcels');
       if (!box) return;
       box.innerHTML = '<p class="subtext" style="margin-top:14px;">กำลังโหลดพัสดุที่รออยู่...</p>';
-      api('getMyWaitingParcels', {})
+      api('getMyWaitingParcels', { lineUserId: (currentProfile ? currentProfile.userId : '') })
         .then(function (res) {
           if (!res || !res.parcels || !res.parcels.length) {
             box.innerHTML = '<p class="subtext" style="margin-top:14px;">ไม่มีพัสดุที่รออยู่</p>';
